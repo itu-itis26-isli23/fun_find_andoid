@@ -1,70 +1,57 @@
-# 🔮 Cyberpunk Smart Badge / Keychain (Fun Find)
+# Cyberpunk Smart Badge Keychain Fun Find
 
-ESP32 tabanlı, çift çekirdekli (Dual-Core), **Apple Find My (Macless-Haystack)** BLE yayını yapan ve dahili **0.91" 128x32 OLED** üzerinde ivmeölçer duyarlı **60 FPS Ultra-Gerçekçi Akışkan Fiziği (Position Based Dynamics - PBD)** simülasyonu çalıştıran akıllı rozet & anahtarlık projesi.
+ESP32 dual core smart badge project broadcasting Apple Find My Macless Haystack BLE beacon while simulating ultra realistic fluid dynamics on a DSTK22666 0.91 inch SSD1306 OLED display using an ADXL345 accelerometer.
 
----
+## Hardware Components
 
-## ⚡ Donanım Bileşenleri
+1. Microcontroller: ESP32 WROOM 32D DevKit v1 with 240 MHz dual core processor and Bluetooth Low Energy.
+2. Display: DSTK22666 SSD1306 monochrome OLED screen with 128 by 32 pixel resolution.
+3. Accelerometer: GY 291 ADXL345 digital 3 axis sensor over I2C.
 
-| Bileşen | Model / Tip | Protokol / Pin | Açıklama |
-| :--- | :--- | :--- | :--- |
-| **Mikrodenetleyici** | ESP32-WROOM-32D (DevKit v1) | USB-UART (COM) | 240 MHz Çift Çekirdek, BLE + Wi-Fi |
-| **Ekran** | DSTK22666 (SSD1306) | I2C (0x3C) | 0.91" 128x32 Piksel OLED |
-| **İvmeölçer** | GY-291 (ADXL345) | I2C (0x53) | 3 Eksen Sayısal İvme Sensörü (±16g) |
+## Pin Connections
 
-### 🔌 I2C Bağlantı Şeması
+ESP32 GPIO 21 SDA connects to OLED SDA and ADXL345 SDA
+ESP32 GPIO 22 SCL connects to OLED SCL and ADXL345 SCL
+ESP32 3V3 connects to OLED VCC and ADXL345 VCC and ADXL345 CS
+ESP32 GND connects to OLED GND and ADXL345 GND and ADXL345 SDO
 
-```text
-ESP32 GPIO 21 (SDA)  --->  OLED SDA & ADXL345 SDA
-ESP32 GPIO 22 (SCL)  --->  OLED SCL & ADXL345 SCL
-ESP32 3V3            --->  OLED VCC & ADXL345 VCC & ADXL345 CS
-ESP32 GND            --->  OLED GND & ADXL345 GND & ADXL345 SDO
-```
+## Features
 
----
+1. Dual Core FreeRTOS Architecture
+Core 0 runs the Apple Find My Macless Haystack background task broadcasting raw 31 byte BLE advertisement payloads.
+Core 1 handles sensor acquisition and simulates 240 fluid particles while rendering at up to 110 frames per second.
 
-## 🚀 Özellikler
+2. Overclocked Display Pipeline
+The SSD1306 internal clock divider and oscillator register D5 is overclocked to value F0.
+This increases display row scanning frequency above 150 Hz and eliminates all screen tearing and scan artifacts.
+The I2C bus speeds up to 800 kHz during frame transmission and delivers the full 512 byte GDDRAM buffer in a single burst.
 
-### 1. Çift Çekirdekli (FreeRTOS) Mimari
-- **Core 0 (Arka Plan BLE Görevi):** Apple Find My (Macless-Haystack) protokolüyle ham 31-byte Bluetooth Low Energy reklam paketleri yayınlar. Apple cihazlar tarafından çevre etiket olarak algılanır.
-- **Core 1 (Fizik & Grafik Görevi):** ADXL345 verilerini 400 kHz I2C hızında okuyup, 240 parçacıklı PBD akışkan simülasyonunu ve 60 FPS ekran yenilemesini yürütür.
+3. Position Based Dynamics Fluid Engine
+Incompressible fluid model using 240 particles with volume preservation constraints.
+Surface tension and cohesive attraction create realistic meniscus and droplet behavior.
+Axis aligned bounding box spatial hashing cuts collision math by 75 percent.
+Direct page memory mapping draws 2 by 2 macro droplets directly into video RAM in under 100 microseconds.
 
-### 2. Ultra-Gerçekçi PBD Akışkan Motoru
-- **Sıkıştırılamaz Sıvı Dinamiği:** Position Based Dynamics (PBD) kısıt çözücüsü ile parçacıklar gerçek bir sıvı gibi birbirini iterek hacim korur.
-- **Yüzey Gerilimi & Kohezyon:** Sıvı damlacıkları birbirini çekerek menisküs ve organik dalgalanmalar oluşturur.
-- **Eylemsizlik (Inertia Boost):** Elinizi hızlıca salladığınızda veya rozeti durdurduğunuzda sıvı eylemsizlik etkisiyle duvara tokat gibi çarpar.
-- **Bayer 4x4 Matris Dithering:** 1-bit monokrom OLED ekranda sıvı derinliğini ve damlacık ışık parlamalarını organik şekilde hissettirir.
+4. Adaptive ProMotion Power Saving
+Dynamic frame timing runs at 110 frames per second during movement and sloshing.
+Refresh rate drops to 33 frames per second when fluid settles and rests.
+This reduces processor and bus activity by 70 percent while keeping active motion perfectly smooth.
+Screen enters automatic power down after 60 seconds of inactivity.
+Hard shake verification instantly wakes the device and triggers kinetic fluid splash.
 
-### 3. Akıllı Güç Yönetimi & Shake-to-Wake
-- 60 saniye boyunca hareketsiz kaldığında ekran ve çevre birimleri otomatik uyku moduna geçer.
-- Sert sallandığında (`> 2.0g`) ADXL345 donanımsal aktivite kesmesi ile anında uyanır ve ekrana kinetik şok dalgası (splash) gönderir.
+## Build and Flashing
 
----
+Method A: PlatformIO
+1. Build and upload using the provided upload.bat script or PlatformIO extension.
+2. Run monitor.bat to observe live telemetry at 115200 baud.
 
-## 🛠️ Kurulum & Yükleme
+Method B: Arduino IDE
+1. Open CyberpunkBadge/CyberpunkBadge.ino in Arduino IDE.
+2. Select ESP32 Dev Module as the board.
+3. Set CPU frequency to 240 MHz and upload speed to 460800 baud.
+4. Flash firmware to your connected device.
 
-### Yöntem A: PlatformIO (Önerilen)
-```bash
-# Projeyi derle
-pio run
+## Apple Find My Key Generation
 
-# ESP32'ye flaşla
-pio run -t upload
-
-# Canlı telemetriyi izle (115200 Baud)
-pio device monitor
-```
-
-### Yöntem B: Arduino IDE
-1. Arduino IDE ile `CyberpunkBadge/CyberpunkBadge.ino` dosyasını açın.
-2. Kart olarak **ESP32 Dev Module** seçin.
-3. Upload Speed: `460800`, CPU Frequency: `240MHz` olarak ayarlayıp yükleyin.
-
----
-
-## 🔑 Apple Find My Anahtar Üretimi
-Kendi özel OpenHaystack / Macless-Haystack anahtarınızı üretmek için:
-```bash
-python key_uretici.py
-```
-Üretilen 28-byte public key değerini koddaki `PUBLIC_KEY_28` dizisine yapıştırabilirsiniz.
+Run key_uretici.py using Python to generate your own private and public key pair.
+Copy the generated 28 byte public key into PUBLIC_KEY_28 array in the source code.

@@ -1,12 +1,15 @@
 /**
  * PROJE: Cyberpunk Akıllı Rozet / Anahtarlık (Hyper-FPS & ProMotion PBD Sürümü)
- * DONANIM: ESP32-WROOM-32D (USB/Pil Besleme) + DSTK22666 (0.91" 128x32 OLED) + GY-291 (ADXL345)
- * OPTİMİZASYON: 
+ * DONANIM: ESP32-WROOM-32D (USB/Pil Besleme) + DSTK22666 (0.91" 128x32 OLED) +
+ * GY-291 (ADXL345) OPTİMİZASYON:
  *  - I2C Hyper-Bus: 800 kHz Yüksek Hızlı Ekran Transferi
- *  - SSD1306 Donanımsal Osilatör Aşırtma (0xF0): Sıfır Yırtılma / Sıfır Titreme (150+ Hz Satır Tarama)
- *  - AABB Erken Eleme & Simetrik 5-Yönlü Spatial Hash & Ters-Karekök (rsqrt) PBD Çözücü
+ *  - SSD1306 Donanımsal Osilatör Aşırtma (0xF0): Sıfır Yırtılma / Sıfır Titreme
+ * (150+ Hz Satır Tarama)
+ *  - AABB Erken Eleme & Simetrik 5-Yönlü Spatial Hash & Ters-Karekök (rsqrt)
+ * PBD Çözücü
  *  - Ultra-Hızlı 2x2 Makro-Piksel Sayfa Eşlemeli Doğrudan GDDRAM Çizim Motoru
- *  - ProMotion Dinamik Kare Hızı: Hareket anında 100-110 FPS, durunca 33 FPS (Pil Tasarrufu)
+ *  - ProMotion Dinamik Kare Hızı: Hareket anında 100-110 FPS, durunca 33 FPS
+ * (Pil Tasarrufu)
  *  - ADXL345 400 Hz Yüksek Hızlı Düşük Güçlü Örnekleme (140 µA sabit akım)
  */
 
@@ -21,76 +24,72 @@
 // ============================================================================
 // 1. DONANIM PİNLERİ VE RENK/FİZİK AYARLARI
 // ============================================================================
-#define I2C_SDA_PIN             21
-#define I2C_SCL_PIN             22
+#define I2C_SDA_PIN 21
+#define I2C_SCL_PIN 22
 
-#define OLED_ADDR               0x3C        // DSTK22666 (0.91" 128x32 SSD1306) I2C Adresi
-#define ADXL345_ADDR            0x53        // GY-291 (ADXL345) I2C Adresi (CS->3V3, SDO->GND)
+#define OLED_ADDR 0x3C    // DSTK22666 (0.91" 128x32 SSD1306) I2C Adresi
+#define ADXL345_ADDR 0x53 // GY-291 (ADXL345) I2C Adresi (CS->3V3, SDO->GND)
 
-#define SCREEN_W                128
-#define SCREEN_H                32
-#define WAKE_TIMEOUT_MS         60000UL     // 60 Saniye (1 Dakika) açık kalır, sonra uyur
+#define SCREEN_W 128
+#define SCREEN_H 32
+#define WAKE_TIMEOUT_MS 60000UL // 60 Saniye (1 Dakika) açık kalır, sonra uyur
 
 // ============================================================================
 // CYBERPUNK NEON PALETTE ARCHITECTURE (PEMBE & NEON)
 // ============================================================================
-#define COLOR_PINK_NEON_RGB     0xFF1493    // Cyberpunk Derin Neon Pembe (#FF1493)
-#define COLOR_PINK_ACCENT_RGB   0xFF69B4    // Parlak Pembe Aksan (#FF69B4)
-#define COLOR_CYBER_PURPLE_RGB  0x8A2BE2    // Elektrik Mor (#8A2BE2)
+#define COLOR_PINK_NEON_RGB 0xFF1493    // Cyberpunk Derin Neon Pembe (#FF1493)
+#define COLOR_PINK_ACCENT_RGB 0xFF69B4  // Parlak Pembe Aksan (#FF69B4)
+#define COLOR_CYBER_PURPLE_RGB 0x8A2BE2 // Elektrik Mor (#8A2BE2)
 
 // SALLAMA VE UYKU HASSASİYETİ:
-#define SHAKE_WAKE_THRESHOLD_G  2.00f
-#define SHAKE_CONFIRM_COUNT     2
+#define SHAKE_WAKE_THRESHOLD_G 2.00f
+#define SHAKE_CONFIRM_COUNT 2
 
 // AKIŞKAN FİZİĞİ PARAMETRELERİ (POSITION BASED DYNAMICS):
-#define NUM_PARTICLES           240         // Kapsülün ~%42'sini dolduran sürekli parçacık sayısı
-#define PARTICLE_REST_DIST      1.80f       // İdeal parçacıklar arası mesafe (Sıkıştırılamaz sıvı)
-#define PARTICLE_REST_DIST_SQ   (PARTICLE_REST_DIST * PARTICLE_REST_DIST)
-#define COHESION_RADIUS         3.60f       // Yüzey gerilimi / çekim yarıçapı
-#define COHESION_RADIUS_SQ      (COHESION_RADIUS * COHESION_RADIUS)
-#define FLUID_DAMPING           0.965f      // Sıvı viskozitesi (akışkanlık direnci)
-#define GRAVITY_ACCEL           0.44f       // İvme kuvvet çarpanı
-#define INERTIA_BOOST           2.20f       // Eylemsizlik çarpanı
+#define NUM_PARTICLES 240 // Kapsülün ~%42'sini dolduran sürekli parçacık sayısı
+#define PARTICLE_REST_DIST                                                     \
+  1.80f // İdeal parçacıklar arası mesafe (Sıkıştırılamaz sıvı)
+#define PARTICLE_REST_DIST_SQ (PARTICLE_REST_DIST * PARTICLE_REST_DIST)
+#define COHESION_RADIUS 3.0f // Yüzey gerilimi / çekim yarıçapı
+#define COHESION_RADIUS_SQ (COHESION_RADIUS * COHESION_RADIUS)
+#define FLUID_DAMPING 0.965f // Sıvı viskozitesi (akışkanlık direnci)
+#define GRAVITY_ACCEL 0.44f  // İvme kuvvet çarpanı
+#define INERTIA_BOOST 2.20f  // Eylemsizlik çarpanı
 
 // KAPSÜL İÇ SINIRLARI
-#define CAPSULE_MIN_X           3.0f
-#define CAPSULE_MAX_X           124.0f
-#define CAPSULE_MIN_Y           3.0f
-#define CAPSULE_MAX_Y           28.0f
-#define CAPSULE_CORNER_R        4.0f
+#define CAPSULE_MIN_X 3.0f
+#define CAPSULE_MAX_X 124.0f
+#define CAPSULE_MIN_Y 3.0f
+#define CAPSULE_MAX_Y 28.0f
+#define CAPSULE_CORNER_R 4.0f
 
 // Eksen yönü kalibrasyonu: Düzeltilmiş X ve Y yönleri (gx = ay, gy = ax)
-#define INVERT_GRAVITY_X        1.0f
-#define INVERT_GRAVITY_Y        1.0f
-#define SWAP_XY_AXES            true
+#define INVERT_GRAVITY_X 1.0f
+#define INVERT_GRAVITY_Y 1.0f
+#define SWAP_XY_AXES true
 
 // ============================================================================
 // 2. MACLESS-HAYSTACK (APPLE FIND MY) 28-BYTE PUBLIC KEY
 // ============================================================================
-const uint8_t PUBLIC_KEY_28[28] = {
-    0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC,
-    0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
-    0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
-    0x11, 0x12, 0x13, 0x14, 0x15, 0x16
-};
+const uint8_t PUBLIC_KEY_28[28] = {0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0x01,
+                                   0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+                                   0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
+                                   0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16};
 
 static uint8_t haystackPayload[31] = {
-    0x1E, 0xFF, 0x4C, 0x00, 0x12, 0x19, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00
-};
+    0x1E, 0xFF, 0x4C, 0x00, 0x12, 0x19, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 
 static esp_ble_adv_params_t bleAdvParams = {
-    .adv_int_min        = 0x0C80,
-    .adv_int_max        = 0x0C80,
-    .adv_type           = ADV_TYPE_NONCONN_IND,
-    .own_addr_type      = BLE_ADDR_TYPE_RANDOM,
-    .peer_addr          = {0},
-    .peer_addr_type     = BLE_ADDR_TYPE_PUBLIC,
-    .channel_map        = ADV_CHNL_ALL,
-    .adv_filter_policy  = ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY,
+    .adv_int_min = 0x0C80,
+    .adv_int_max = 0x0C80,
+    .adv_type = ADV_TYPE_NONCONN_IND,
+    .own_addr_type = BLE_ADDR_TYPE_RANDOM,
+    .peer_addr = {0},
+    .peer_addr_type = BLE_ADDR_TYPE_PUBLIC,
+    .channel_map = ADV_CHNL_ALL,
+    .adv_filter_policy = ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY,
 };
 
 // ============================================================================
@@ -142,22 +141,32 @@ static void oledCommand(uint8_t cmd) {
 
 static void oledInit128x32() {
   const uint8_t initSeq[] = {
-      0xAE,             // Display Off
-      0xD5, 0xF0,       // MAX OSCILLATOR CLOCK (0xF0: row scan hızını 150+ Hz yapar, titreme ve yırtılmayı siler)
-      0xA8, 0x1F,       // Multiplex 1/32
-      0xD3, 0x00,       // Display Offset 0
-      0x40,             // Start line 0
-      0x8D, 0x14,       // Charge pump ON
-      0x20, 0x00,       // Horizontal Addressing Mode
-      0xA1,             // Segment Remap (Col 127 mapped to SEG0)
-      0xC8,             // COM Output Scan Direction (remapped mode)
-      0xDA, 0x02,       // COM Pins Hardware Config: Sequential
-      0x81, 0xCF,       // Contrast Control (High Brightness)
-      0xD9, 0xF1,       // Pre-charge Period (Phase 1: 1 DCLK, Phase 2: 15 DCLK)
-      0xDB, 0x40,       // VCOMH Deselect Level (~0.77 x VCC)
-      0xA4,             // Entire Display On (Resume to RAM content)
-      0xA6,             // Normal Display (Non-inverted)
-      0xAF              // Display ON
+      0xAE, // Display Off
+      0xD5,
+      0xF0, // MAX OSCILLATOR CLOCK (0xF0: row scan hızını 150+ Hz yapar,
+            // titreme ve yırtılmayı siler)
+      0xA8,
+      0x1F, // Multiplex 1/32
+      0xD3,
+      0x00, // Display Offset 0
+      0x40, // Start line 0
+      0x8D,
+      0x14, // Charge pump ON
+      0x20,
+      0x00, // Horizontal Addressing Mode
+      0xA1, // Segment Remap (Col 127 mapped to SEG0)
+      0xC8, // COM Output Scan Direction (remapped mode)
+      0xDA,
+      0x02, // COM Pins Hardware Config: Sequential
+      0x81,
+      0xCF, // Contrast Control (High Brightness)
+      0xD9,
+      0xF1, // Pre-charge Period (Phase 1: 1 DCLK, Phase 2: 15 DCLK)
+      0xDB,
+      0x40, // VCOMH Deselect Level (~0.77 x VCC)
+      0xA4, // Entire Display On (Resume to RAM content)
+      0xA6, // Normal Display (Non-inverted)
+      0xAF  // Display ON
   };
   Wire.beginTransmission(OLED_ADDR);
   Wire.write(0x00);
@@ -186,7 +195,8 @@ static void oledFlush() {
   Wire.write(windowCmds, sizeof(windowCmds));
   Wire.endTransmission();
 
-  // Tek seferde kesintisiz 512-byte GDDRAM burst aktarımı (Sıfır işlem arası gecikme)
+  // Tek seferde kesintisiz 512-byte GDDRAM burst aktarımı (Sıfır işlem arası
+  // gecikme)
   Wire.beginTransmission(OLED_ADDR);
   Wire.write(0x40);
   Wire.write(oledBuffer, 512);
@@ -237,7 +247,9 @@ static void adxl345ConfigureMode(bool lowPowerWatchMode) {
   if (lowPowerWatchMode) {
     adxlWriteReg(0x2C, 0x19); // Low power mode, 8 Hz sleep sampling (~25 µA)
   } else {
-    adxlWriteReg(0x2C, 0x0C); // Aktif mod: 400 Hz örnekleme (Akıcı tepki, 140 µA sabit akım)
+    adxlWriteReg(
+        0x2C,
+        0x0C); // Aktif mod: 400 Hz örnekleme (Akıcı tepki, 140 µA sabit akım)
   }
 
   adxlWriteReg(0x2D, 0x08); // Measurement mode
@@ -272,12 +284,16 @@ static bool adxl345CheckHardShakeWake() {
     if (now - firstHitTimeMs > 500) {
       shakeHitCount = 1;
       firstHitTimeMs = now;
-      Serial.printf("[UYKU DINLEME] Ilk sarsinti algilandi (%.2f G) -> Ikinci darbe bekleniyor...\n", totalG);
+      Serial.printf("[UYKU DINLEME] Ilk sarsinti algilandi (%.2f G) -> Ikinci "
+                    "darbe bekleniyor...\n",
+                    totalG);
     } else {
       shakeHitCount++;
       if (shakeHitCount >= SHAKE_CONFIRM_COUNT) {
         shakeHitCount = 0;
-        Serial.printf("[UYANDIRILDI!] Sert sallama dogrulandi (%.2f G). Ekran 60 sn acik!\n", totalG);
+        Serial.printf("[UYANDIRILDI!] Sert sallama dogrulandi (%.2f G). Ekran "
+                      "60 sn acik!\n",
+                      totalG);
         return true;
       }
     }
@@ -314,7 +330,8 @@ static void adxl345ReadGravity() {
       lastWakeTimeMs = millis();
     }
 
-    // Dinamik adaptif filtre (Hareketliyken sıfır gecikme, dururken sıfır gürültü)
+    // Dinamik adaptif filtre (Hareketliyken sıfır gecikme, dururken sıfır
+    // gürültü)
     float alpha = (shakeMagnitude > 0.15f) ? 0.25f : 0.12f;
     filtGx = (filtGx * (1.0f - alpha)) + (gx * alpha);
     filtGy = (filtGy * (1.0f - alpha)) + (gy * alpha);
@@ -426,8 +443,7 @@ static inline void applyCapsuleBoundary(FluidParticle &p) {
 
 // 5-Yönlü Simetrik Hücre Komşuluğu (Tüm 8 komşu tek seferde taranır)
 static const int8_t NEIGHBOR_DIRS[5][2] = {
-    {0, 0}, {1, 0}, {-1, 1}, {0, 1}, {1, 1}
-};
+    {0, 0}, {1, 0}, {-1, 1}, {0, 1}, {1, 1}};
 
 static void stepFluidPhysics() {
   if (shakeMagnitude > 0.45f) {
@@ -463,15 +479,22 @@ static void stepFluidPhysics() {
   for (uint8_t i = 0; i < NUM_PARTICLES; i++) {
     int gx = (int)(particles[i].x * 0.125f);
     int gy = (int)(particles[i].y * 0.125f);
-    if (gx < 0) gx = 0; else if (gx >= GRID_COLS) gx = GRID_COLS - 1;
-    if (gy < 0) gy = 0; else if (gy >= GRID_ROWS) gy = GRID_ROWS - 1;
+    if (gx < 0)
+      gx = 0;
+    else if (gx >= GRID_COLS)
+      gx = GRID_COLS - 1;
+    if (gy < 0)
+      gy = 0;
+    else if (gy >= GRID_ROWS)
+      gy = GRID_ROWS - 1;
 
     if (gridCount[gy][gx] < MAX_CELL_PARTICLES) {
       gridParticles[gy][gx][gridCount[gy][gx]++] = i;
     }
   }
 
-  // 3. Simetrik 5-Yönlü Spatial Hash & AABB Erken Eleme Çözücü (%75 daha az işlem)
+  // 3. Simetrik 5-Yönlü Spatial Hash & AABB Erken Eleme Çözücü (%75 daha az
+  // işlem)
   const float REST_DIST = PARTICLE_REST_DIST;
   const float REST_DIST_SQ = PARTICLE_REST_DIST_SQ;
   const float COHES_RADIUS = COHESION_RADIUS;
@@ -481,15 +504,18 @@ static void stepFluidPhysics() {
     for (int gy = 0; gy < GRID_ROWS; gy++) {
       for (int gx = 0; gx < GRID_COLS; gx++) {
         uint8_t countA = gridCount[gy][gx];
-        if (countA == 0) continue;
+        if (countA == 0)
+          continue;
 
         for (int d = 0; d < 5; d++) {
           int nx = gx + NEIGHBOR_DIRS[d][0];
           int ny = gy + NEIGHBOR_DIRS[d][1];
-          if (nx < 0 || nx >= GRID_COLS || ny < 0 || ny >= GRID_ROWS) continue;
+          if (nx < 0 || nx >= GRID_COLS || ny < 0 || ny >= GRID_ROWS)
+            continue;
 
           uint8_t countB = gridCount[ny][nx];
-          if (countB == 0) continue;
+          if (countB == 0)
+            continue;
 
           bool isSameCell = (d == 0);
 
@@ -502,15 +528,19 @@ static void stepFluidPhysics() {
             for (uint8_t b = startB; b < countB; b++) {
               uint8_t j = gridParticles[ny][nx][b];
 
-              // AABB Erken Eleme: 1-çevrimlik skaler eleme (sqrtf ve distSq hesaplamalarını %75 azaltır)
+              // AABB Erken Eleme: 1-çevrimlik skaler eleme (sqrtf ve distSq
+              // hesaplamalarını %75 azaltır)
               float diffX = pxA - particles[j].x;
-              if (diffX > COHES_RADIUS || diffX < -COHES_RADIUS) continue;
+              if (diffX > COHES_RADIUS || diffX < -COHES_RADIUS)
+                continue;
 
               float diffY = pyA - particles[j].y;
-              if (diffY > COHES_RADIUS || diffY < -COHES_RADIUS) continue;
+              if (diffY > COHES_RADIUS || diffY < -COHES_RADIUS)
+                continue;
 
               float distSq = diffX * diffX + diffY * diffY;
-              if (distSq >= COHES_RADIUS_SQ || distSq < 0.0001f) continue;
+              if (distSq >= COHES_RADIUS_SQ || distSq < 0.0001f)
+                continue;
 
               float invDist = 1.0f / sqrtf(distSq);
               float dist = distSq * invDist;
@@ -571,8 +601,8 @@ static void renderUltraFluid(uint32_t frameCounter) {
 
   // 2. Cyberpunk Kapsül Çerçevesi (Cam Tüp)
   for (int x = 4; x < SCREEN_W - 4; x++) {
-    oledBuffer[x] |= 0x02;                           // Y = 1
-    oledBuffer[x + (3 << 7)] |= 0x40;               // Y = 30 (SCREEN_H - 2)
+    oledBuffer[x] |= 0x02;            // Y = 1
+    oledBuffer[x + (3 << 7)] |= 0x40; // Y = 30 (SCREEN_H - 2)
   }
   for (int y = 4; y < SCREEN_H - 4; y++) {
     oledSetPixel(1, y);
@@ -580,10 +610,14 @@ static void renderUltraFluid(uint32_t frameCounter) {
   }
 
   // Yuvarlatılmış köşeler
-  oledSetPixel(2, 3); oledSetPixel(3, 2);
-  oledSetPixel(SCREEN_W - 3, 3); oledSetPixel(SCREEN_W - 4, 2);
-  oledSetPixel(2, SCREEN_H - 4); oledSetPixel(3, SCREEN_H - 3);
-  oledSetPixel(SCREEN_W - 3, SCREEN_H - 4); oledSetPixel(SCREEN_W - 4, SCREEN_H - 3);
+  oledSetPixel(2, 3);
+  oledSetPixel(3, 2);
+  oledSetPixel(SCREEN_W - 3, 3);
+  oledSetPixel(SCREEN_W - 4, 2);
+  oledSetPixel(2, SCREEN_H - 4);
+  oledSetPixel(3, SCREEN_H - 3);
+  oledSetPixel(SCREEN_W - 3, SCREEN_H - 4);
+  oledSetPixel(SCREEN_W - 4, SCREEN_H - 3);
 
   // Kapsül cetvel / seviye işaretleri
   oledBuffer[SCREEN_W / 4] |= 0x01;
@@ -592,8 +626,10 @@ static void renderUltraFluid(uint32_t frameCounter) {
 
   // Kalp atışı / durum ledi
   if ((frameCounter % 120) < 14) {
-    oledSetPixel(SCREEN_W - 6, 4); oledSetPixel(SCREEN_W - 7, 4);
-    oledSetPixel(SCREEN_W - 6, 5); oledSetPixel(SCREEN_W - 7, 5);
+    oledSetPixel(SCREEN_W - 6, 4);
+    oledSetPixel(SCREEN_W - 7, 4);
+    oledSetPixel(SCREEN_W - 6, 5);
+    oledSetPixel(SCREEN_W - 7, 5);
   }
 
   oledFlush();
@@ -628,7 +664,9 @@ static void runHardwareDiagnostics() {
   Wire.beginTransmission(ADXL345_ADDR);
   if (Wire.endTransmission() == 0) {
     uint8_t devId = adxlReadReg(0x00);
-    Serial.printf("[OK] GY-291 (ADXL345) 0x53 adresinde bagli! (Cip ID: 0x%02X)\n", devId);
+    Serial.printf(
+        "[OK] GY-291 (ADXL345) 0x53 adresinde bagli! (Cip ID: 0x%02X)\n",
+        devId);
   } else {
     Serial.println("[HATA!] GY-291 bulunamadi!");
   }
@@ -653,7 +691,8 @@ static void handleSerialCommands() {
       }
       lastWakeTimeMs = millis();
       triggerKineticSplash(1.4f);
-      Serial.println("[SERI KOMUT] Suya Kinetik Sok Dalgasi (Splash) uygulandi!");
+      Serial.println(
+          "[SERI KOMUT] Suya Kinetik Sok Dalgasi (Splash) uygulandi!");
     } else if (c == 'u' || c == 'U') {
       if (isSystemAwake) {
         isSystemAwake = false;
@@ -690,9 +729,10 @@ void bleAirTagTask(void *pvParameters) {
 
   esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV, ESP_PWR_LVL_P9);
 
-  Serial.printf("[BLE CORE 0] Apple Find My yayini aktif! MAC: %02X:%02X:%02X:%02X:%02X:%02X\n",
-                randMacAddr[0], randMacAddr[1], randMacAddr[2],
-                randMacAddr[3], randMacAddr[4], randMacAddr[5]);
+  Serial.printf("[BLE CORE 0] Apple Find My yayini aktif! MAC: "
+                "%02X:%02X:%02X:%02X:%02X:%02X\n",
+                randMacAddr[0], randMacAddr[1], randMacAddr[2], randMacAddr[3],
+                randMacAddr[4], randMacAddr[5]);
 
   for (;;) {
     vTaskDelay(pdMS_TO_TICKS(10000));
@@ -760,14 +800,18 @@ void waterSimTask(void *pvParameters) {
     if (now - lastTelemetryMs >= 2000) {
       lastTelemetryMs = now;
       uint32_t remSec = (WAKE_TIMEOUT_MS - elapsed) / 1000;
-      Serial.printf("[PROMOTION PBD] Fx:%+.2f Fy:%+.2f | Enerji:%.2f | FPS:%u | Kalan:%lu sn\n",
-                    effGx, effGy, smoothedKinetic, liveFps, (unsigned long)remSec);
+      Serial.printf("[PROMOTION PBD] Fx:%+.2f Fy:%+.2f | Enerji:%.2f | FPS:%u "
+                    "| Kalan:%lu sn\n",
+                    effGx, effGy, smoothedKinetic, liveFps,
+                    (unsigned long)remSec);
     }
 
     // ADAPTİF PROMOTION FPS DİNAMİĞİ (PİL KORUMA & HİPER-AKIŞKANLIK):
     // Hareket / Çalkalanma halinde: 8 ms hedef (~110-120 FPS, ultra akıcı)
-    // Sıvı durulunca: 30 ms hedef (~33 FPS, %70 CPU/I2C uyku modu, bataryayı korur)
-    uint32_t targetFrameTimeMs = (smoothedKinetic > 0.06f || shakeMagnitude > 0.04f) ? 8 : 30;
+    // Sıvı durulunca: 30 ms hedef (~33 FPS, %70 CPU/I2C uyku modu, bataryayı
+    // korur)
+    uint32_t targetFrameTimeMs =
+        (smoothedKinetic > 0.06f || shakeMagnitude > 0.04f) ? 8 : 30;
     uint32_t workTime = millis() - frameStart;
 
     if (workTime < targetFrameTimeMs) {
@@ -784,7 +828,8 @@ void setup() {
 
   Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN, 400000UL);
   Wire.setTimeOut(50);
-  Wire.setBufferSize(640); // 640 byte FIFO tampon (tek seferde 512 byte kesintisiz aktarım)
+  Wire.setBufferSize(
+      640); // 640 byte FIFO tampon (tek seferde 512 byte kesintisiz aktarım)
 
   runHardwareDiagnostics();
   adxl345ConfigureMode(false);
@@ -793,10 +838,10 @@ void setup() {
 
   lastWakeTimeMs = millis();
 
-  xTaskCreatePinnedToCore(bleAirTagTask, "BLE_Haystack", 4096, NULL, 2, NULL, 0);
-  xTaskCreatePinnedToCore(waterSimTask, "PBD_UltraFluid", 8192, NULL, 5, NULL, 1);
+  xTaskCreatePinnedToCore(bleAirTagTask, "BLE_Haystack", 4096, NULL, 2, NULL,
+                          0);
+  xTaskCreatePinnedToCore(waterSimTask, "PBD_UltraFluid", 8192, NULL, 5, NULL,
+                          1);
 }
 
-void loop() {
-  vTaskDelete(NULL);
-}
+void loop() { vTaskDelete(NULL); }

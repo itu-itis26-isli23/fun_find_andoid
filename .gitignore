@@ -1,0 +1,17 @@
+# PlatformIO build artifacts
+.pio/
+.vscode/
+
+# Compiled outputs
+*.bin
+*.elf
+*.o
+*.a
+*.d
+
+# Temporary and log files
+*.tmp
+*.log
+test.gz
+__pycache__/
+*.pyc

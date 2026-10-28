@@ -158,14 +158,27 @@ static void buzzerSilence() {
   digitalWrite(BUZZER_PIN, HIGH); // PNP transistörü kesime sok -> Tam sessizlik!
 }
 
-static void buzzerPlayTone(uint32_t freqHz, uint8_t dutyLowPercent) {
+static void buzzerPulseActive(uint32_t durationMs) {
+  if (isSoundMuted) return;
+  if (buzzerAttached) {
+#if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
+    ledcDetach(BUZZER_PIN);
+#else
+    ledcDetachPin(BUZZER_PIN);
+#endif
+    buzzerAttached = false;
+  }
+  pinMode(BUZZER_PIN, OUTPUT);
+  digitalWrite(BUZZER_PIN, LOW); // Active-LOW: 0V iletime sokar -> Aktif buzzer öter
+  delay(durationMs);
+  digitalWrite(BUZZER_PIN, HIGH); // Sus
+}
+
+static void buzzerPlayTone(uint32_t freqHz) {
   if (isSoundMuted || freqHz < 80) {
     buzzerSilence();
     return;
   }
-  // MH-FMD Active-LOW (PNP) olduğu için duty değeri terslenir:
-  // 255 = Susturma (%0 ses), 200 = Kısık/Orta (%20 ses), 128 = Tam Kare Dalga (%50 ses)
-  uint32_t invertedDuty = 255 - ((dutyLowPercent * 255) / 100);
 
 #if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
   if (!buzzerAttached) {
@@ -174,14 +187,15 @@ static void buzzerPlayTone(uint32_t freqHz, uint8_t dutyLowPercent) {
   } else {
     ledcChangeFrequency(BUZZER_PIN, freqHz, 8);
   }
-  ledcWrite(BUZZER_PIN, invertedDuty);
+  // 128 = %50 Simetrik Kare Dalga (Maksimum Akustik Rezonans Gücü)
+  ledcWrite(BUZZER_PIN, 128);
 #else
   ledcSetup(0, freqHz, 8);
   if (!buzzerAttached) {
     ledcAttachPin(BUZZER_PIN, 0);
     buzzerAttached = true;
   }
-  ledcWrite(0, invertedDuty);
+  ledcWrite(0, 128);
 #endif
 }
 
@@ -190,8 +204,8 @@ static void buzzerPlayWakeSound() {
   if (isSoundMuted) return;
   const uint16_t notes[4] = {523, 659, 784, 1046};
   for (int i = 0; i < 4; i++) {
-    buzzerPlayTone(notes[i], 35);
-    delay(35);
+    buzzerPlayTone(notes[i]);
+    delay(45);
   }
   buzzerSilence();
 }
@@ -243,16 +257,11 @@ static void updateAccelSound(uint32_t frameCounter, float kineticEnergy) {
   uint32_t finalFreq = (uint32_t)smoothedFreq + ((fastRand() % 31) - 15);
 
 #if BUZZER_IS_PASSIVE
-  // Pasif Buzzer: İvme ve sıvı hızına göre ses şiddeti (%10 ile %40 arası) ve frekans kayması
-  uint8_t volumeDuty = (uint8_t)constrain(10 + (int)(kineticEnergy * 5.0f) + (int)(accelDelta * 22.0f), 10, 42);
-  buzzerPlayTone(finalFreq, volumeDuty);
+  buzzerPlayTone(finalFreq);
 #else
-  // Aktif Buzzer: İvme arttıkça sıklaşan darbeli Geiger / Su Damlacığı tıkırtısı
   int pulsePeriod = constrain(8 - (int)(kineticEnergy * 2.0f) - (int)(accelDelta * 4.0f), 1, 8);
   if ((frameCounter % pulsePeriod) == 0) {
-    buzzerPlayTone(finalFreq, 32);
-  } else {
-    buzzerSilence();
+    buzzerPulseActive(18);
   }
 #endif
 }
@@ -808,6 +817,12 @@ static void runHardwareDiagnostics() {
   Serial.println("  'u' -> Hemen Uyku Moduna Gecir (Ekran ve Buzzer Kapanir)");
   Serial.println("  'm' -> Buzzer Sesini Ac / Kapat (Mute)");
   Serial.println("  'r' -> Sivi Havuzunu Sifirla");
+  Serial.println("  --- BUZZER DONANIM TESHIS TESTLERI ---");
+  Serial.println("  '1' -> Test 1: Aktif Buzzer (Active-LOW, 0V) 500ms");
+  Serial.println("  '2' -> Test 2: Aktif Buzzer (Active-HIGH, 3.3V) 500ms");
+  Serial.println("  '3' -> Test 3: Pasif Buzzer (2000 Hz %50 Kare Dalga) 600ms");
+  Serial.println("  '4' -> Test 4: Pasif Buzzer (1000 Hz %50 Kare Dalga) 600ms");
+  Serial.println("  '5' -> Test 5: Cyberpunk Arpej Chime Cal");
   Serial.println("=======================================================\n");
 }
 
@@ -842,6 +857,43 @@ static void handleSerialCommands() {
       initFluidPool();
       lastWakeTimeMs = millis();
       Serial.println("[SERI KOMUT] Sivi havuzu sifirlandi.");
+    } else if (c == '1') {
+      Serial.println("[TEST 1] Aktif Buzzer (Active-LOW: Pin 0V / LOW) 500ms baslatiliyor...");
+      buzzerPulseActive(500);
+      Serial.println("[TEST 1] Tamamlandi. Ses geldi mi?");
+    } else if (c == '2') {
+      Serial.println("[TEST 2] Aktif Buzzer (Active-HIGH: Pin 3.3V / HIGH) 500ms baslatiliyor...");
+      if (buzzerAttached) {
+#if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
+        ledcDetach(BUZZER_PIN);
+#else
+        ledcDetachPin(BUZZER_PIN);
+#endif
+        buzzerAttached = false;
+      }
+      pinMode(BUZZER_PIN, OUTPUT);
+      digitalWrite(BUZZER_PIN, HIGH);
+      delay(500);
+      digitalWrite(BUZZER_PIN, LOW);
+      delay(50);
+      buzzerSilence();
+      Serial.println("[TEST 2] Tamamlandi. Ses geldi mi?");
+    } else if (c == '3') {
+      Serial.println("[TEST 3] Pasif Buzzer (2000 Hz, %50 Kare Dalga) 600ms baslatiliyor...");
+      buzzerPlayTone(2000);
+      delay(600);
+      buzzerSilence();
+      Serial.println("[TEST 3] Tamamlandi. Ses geldi mi?");
+    } else if (c == '4') {
+      Serial.println("[TEST 4] Pasif Buzzer (1000 Hz, %50 Kare Dalga) 600ms baslatiliyor...");
+      buzzerPlayTone(1000);
+      delay(600);
+      buzzerSilence();
+      Serial.println("[TEST 4] Tamamlandi. Ses geldi mi?");
+    } else if (c == '5') {
+      Serial.println("[TEST 5] Cyberpunk Arpej Chime baslatiliyor...");
+      buzzerPlayWakeSound();
+      Serial.println("[TEST 5] Tamamlandi.");
     }
   }
 }

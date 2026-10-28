@@ -32,6 +32,10 @@
 // Aktif Buzzer ise 'false' (İvmeye göre darbeli Cyberpunk tıkırtısı üretir).
 #define BUZZER_IS_PASSIVE true
 
+// SES AYARLARI (Kısık, zarif ve tatlı seviye):
+#define BUZZER_VOLUME_PERCENT                                                  \
+  4 // %2 - %6 arası: çok tatlı, kısık ve kulak yormayan ses
+
 #define OLED_ADDR 0x3C    // DSTK22666 (0.91" 128x32 SSD1306) I2C Adresi
 #define ADXL345_ADDR 0x53 // GY-291 (ADXL345) I2C Adresi (CS->3V3, SDO->GND)
 
@@ -116,19 +120,20 @@ static uint8_t gridCount[GRID_ROWS][GRID_COLS];
 static uint8_t gridParticles[GRID_ROWS][GRID_COLS][MAX_CELL_PARTICLES];
 
 static bool isSystemAwake = true;
-static bool isSoundMuted = false; // 'm' tuşu ile sesi tamamen kapatıp açmak için
+static bool isSoundMuted =
+    false; // 'm' tuşu ile sesi tamamen kapatıp açmak için
 static bool buzzerAttached = false;
 static uint32_t lastWakeTimeMs = 0;
 
 static float filtGx = 0.0f;
 static float filtGy = 1.0f;
-static float prevGx = 0.0f;
-static float prevGy = 1.0f;
 static float effGx = 0.0f;
 static float effGy = 1.0f;
 static float currentTotalG = 1.0f;
 static float shakeMagnitude = 0.0f;
 static float smoothedFreq = 0.0f; // Yumuşatılmış anlık ses frekansı (Hz)
+static float adxlJerkMagnitude = 0.0f; // 3D ivme vektörünün değişim hızı (|dA/dt|)
+static float adxlJerkDerivative = 0.0f; // 3D ivme değişim hızının türevi (d|jerk|/dt)
 
 static uint32_t rngState = 0xCAFEBABE;
 static inline uint32_t fastRand() {
@@ -155,11 +160,15 @@ static void buzzerSilence() {
     buzzerAttached = false;
   }
   pinMode(BUZZER_PIN, OUTPUT);
-  digitalWrite(BUZZER_PIN, HIGH); // PNP transistörü kesime sok -> Tam sessizlik!
+  digitalWrite(BUZZER_PIN,
+               HIGH); // PNP transistörü kesime sok -> Tam sessizlik!
 }
 
-static void buzzerPulseActive(uint32_t durationMs) {
-  if (isSoundMuted) return;
+// Doğrudan donanımsal bit-bang kare dalgası (Kısık, zarif kristal ton)
+static void buzzerDirectTone(uint32_t freqHz, uint32_t durationMs,
+                             float dutyPercent = 2.2f) {
+  if (isSoundMuted || freqHz < 80)
+    return;
   if (buzzerAttached) {
 #if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
     ledcDetach(BUZZER_PIN);
@@ -169,16 +178,49 @@ static void buzzerPulseActive(uint32_t durationMs) {
     buzzerAttached = false;
   }
   pinMode(BUZZER_PIN, OUTPUT);
-  digitalWrite(BUZZER_PIN, LOW); // Active-LOW: 0V iletime sokar -> Aktif buzzer öter
+  uint32_t periodUs = 1000000UL / freqHz;
+  uint32_t lowUs = (uint32_t)((periodUs * dutyPercent) / 100.0f);
+  if (lowUs < 5)
+    lowUs = 5; // Mikro darbe: çok kısık, fısıltı ses
+  uint32_t highUs = periodUs - lowUs;
+  uint32_t cycles = (freqHz * durationMs) / 1000UL;
+  for (uint32_t i = 0; i < cycles; i++) {
+    digitalWrite(BUZZER_PIN, LOW); // Active-LOW: mikro iletim
+    delayMicroseconds(lowUs);
+    digitalWrite(BUZZER_PIN, HIGH); // kesim
+    delayMicroseconds(highUs);
+  }
+  digitalWrite(BUZZER_PIN, HIGH); // Sus
+}
+
+static void buzzerPulseActive(uint32_t durationMs) {
+  if (isSoundMuted)
+    return;
+  if (buzzerAttached) {
+#if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
+    ledcDetach(BUZZER_PIN);
+#else
+    ledcDetachPin(BUZZER_PIN);
+#endif
+    buzzerAttached = false;
+  }
+  pinMode(BUZZER_PIN, OUTPUT);
+  digitalWrite(BUZZER_PIN,
+               LOW); // Active-LOW: 0V iletime sokar -> Aktif buzzer öter
   delay(durationMs);
   digitalWrite(BUZZER_PIN, HIGH); // Sus
 }
 
-static void buzzerPlayTone(uint32_t freqHz) {
-  if (isSoundMuted || freqHz < 80) {
+// Dinamik frekans ve dinamik logaritmik ses şiddeti kontrolü
+static void buzzerPlayTone(uint32_t freqHz, float dutyPercent) {
+  if (isSoundMuted || freqHz < 120) {
     buzzerSilence();
     return;
   }
+
+  // Active-LOW PWM duty: 255 = Tam Sus, 248 = %2.8 Fısıltı, 224 = %12 Canlı Tatlı Ses
+  float clampedDuty = constrain(dutyPercent, 1.2f, 15.0f);
+  uint32_t duty = 255 - (uint32_t)((clampedDuty * 255.0f) / 100.0f);
 
 #if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
   if (!buzzerAttached) {
@@ -187,81 +229,98 @@ static void buzzerPlayTone(uint32_t freqHz) {
   } else {
     ledcChangeFrequency(BUZZER_PIN, freqHz, 8);
   }
-  // 128 = %50 Simetrik Kare Dalga (Maksimum Akustik Rezonans Gücü)
-  ledcWrite(BUZZER_PIN, 128);
+  ledcWrite(BUZZER_PIN, duty);
 #else
   ledcSetup(0, freqHz, 8);
   if (!buzzerAttached) {
     ledcAttachPin(BUZZER_PIN, 0);
     buzzerAttached = true;
   }
-  ledcWrite(0, 128);
+  ledcWrite(0, duty);
 #endif
 }
 
-// Uyanışta ve açılışta çalacak kısa Cyberpunk Arpej melodisi (C5, E5, G5, C6)
+// Uyanışta ve açılışta çalacak peri masalı / kristal Cyberpunk Arpej melodisi
+// (C6, E6, G6, C7)
 static void buzzerPlayWakeSound() {
-  if (isSoundMuted) return;
-  const uint16_t notes[4] = {523, 659, 784, 1046};
+  if (isSoundMuted)
+    return;
+  const uint16_t notes[4] = {1046, 1318, 1568, 2093}; // C6, E6, G6, C7
   for (int i = 0; i < 4; i++) {
-    buzzerPlayTone(notes[i]);
-    delay(45);
+    buzzerDirectTone(notes[i], 45, 2.5f);
+    delay(12);
   }
   buzzerSilence();
 }
 
-// İvme, eğim açısı ve sıvı akış hızına göre dinamik Cyberpunk synth frekansı üretir
+// SADECE ADXL345 3D VEKTÖR DEĞİŞİM HIZI VE TÜREVİNE BAĞLI AKILLI SES MOTORU:
+// Suyun kinetik enerjisi KESİNLİKLE KULLANILMAZ (Sıvı hareketinden %100 bağımsızdır!).
+// Cihaz hangi yönde hareket ettirilirse ettirilsin sensör türevi oluşur ve tatlı ses çıkar;
+// cihaz elde sabit tutulduğu an (içeride su çalkalanmaya devam etse dahi) türev 0 olur ve ses hemen susar.
 static void updateAccelSound(uint32_t frameCounter, float kineticEnergy) {
   if (isSoundMuted || !isSystemAwake) {
     buzzerSilence();
     return;
   }
 
-  // 1. Eğim değişim hızı (Delta Tilt) ve dinamik G-Kuvveti sapması
-  float tiltSpeed = fabsf(filtGx - prevGx) + fabsf(filtGy - prevGy);
-  prevGx = filtGx;
-  prevGy = filtGy;
+  static float smoothedDuty = 2.4f;
 
-  float accelDelta = fabsf(currentTotalG - 1.0f); // 0.0 (sabit) .. 2.0+ (sert ivme)
+  // 1. SADECE ADXL345 3D İVME VEKTÖRÜNÜN DEĞİŞİM HIZI VE TÜREVİ:
+  float motionEnergy = (adxlJerkMagnitude * 0.70f) + (adxlJerkDerivative * 0.30f);
 
-  // 2. Sıvı durulduysa, rozet sabitse ve sarsıntı yoksa buzzer'ı otomatik sustur!
-  if (kineticEnergy < 0.08f && accelDelta < 0.08f && tiltSpeed < 0.015f) {
-    smoothedFreq *= 0.82f;
-    if (smoothedFreq < 120.0f) {
+  // 2. SABİT DURMA EŞİĞİ (Sensör kuantizasyon gürültüsünü filtreler -> Sabit tutulunca 0 mA Tam Sessizlik)
+  const float MOTION_THRESHOLD = 0.035f;
+  if (motionEnergy < MOTION_THRESHOLD) {
+    smoothedFreq *= 0.60f;
+    smoothedDuty *= 0.60f;
+    if (smoothedFreq < 150.0f || smoothedDuty < 1.0f) {
       smoothedFreq = 0.0f;
-      buzzerSilence();
+      smoothedDuty = 2.0f;
+      buzzerSilence(); // 0 mA / Tam sessizlik
       return;
     }
   }
 
-  // 3. Cyberpunk Pitch-Bend Hedef Frekansı:
-  //    - Eğim açısı baz tonu belirler (240 Hz - 700 Hz)
-  //    - Sıvı kinetik enerjisi sesi tizleştirir (1300 Hz'e kadar ek artış)
-  //    - G-kuvveti ivmesi ani synth yükselmesi sağlar (600 Hz'e kadar ek artış)
-  float tiltBase = 240.0f + (fabsf(filtGx) * 280.0f) + (fabsf(filtGy) * 180.0f);
-  float flowBoost = fminf(kineticEnergy * 110.0f, 1300.0f);
-  float gForceBoost = fminf(accelDelta * 750.0f, 600.0f);
+  // 3. HAREKET ARTTIKÇA LOGARİTMİK BÜYÜME (Logaritma: 0.2f)
+  float excessMotion = motionEnergy - MOTION_THRESHOLD;
+  if (excessMotion < 0.0f)
+    excessMotion = 0.0f;
+  float logFactor = logf(1.0f + (excessMotion * 0.2f));
 
-  float targetFreq = tiltBase + flowBoost + gForceBoost;
-  if (targetFreq > 2400.0f) targetFreq = 2400.0f;
-  if (targetFreq < 180.0f)  targetFreq = 180.0f;
+  // 4. DEĞİŞKEN, ZENGİN VE TATLI SES (Eğim Açısı Bükümü + 600 Hz Hareket Aralığı):
+  //    - Eğim açısı theremin gibi melodiyi organik büker (X ve Y eksenleri)
+  //    - Hareket hızı logaritmik olarak 600 Hz aralıkta tizleştirir
+  float tiltMod = (filtGx * 180.0f) + (filtGy * 140.0f);
+  float targetFreq = 720.0f + tiltMod + (logFactor * 600.0f);
+  if (targetFreq > 1900.0f)
+    targetFreq = 1900.0f;
+  if (targetFreq < 450.0f)
+    targetFreq = 450.0f;
 
-  // Yumuşak Portamento (Frekans geçişi)
+  // 5. SES SEVİYESİ (Daha Sesli, Dolgun ve Net Duyulan Tatlı Seviye: %2.4 - %11.5):
+  float targetDuty = 2.6f + (logFactor * 14.0f);
+  if (targetDuty > 11.5f)
+    targetDuty = 11.5f;
+  if (targetDuty < 2.0f)
+    targetDuty = 2.0f;
+
+  // 6. YUMUŞAK PORTAMENTO VE HIZLI KAPANMA SÜZÜLÜŞÜ:
   if (smoothedFreq < 100.0f) {
     smoothedFreq = targetFreq;
   } else {
-    smoothedFreq = (smoothedFreq * 0.70f) + (targetFreq * 0.30f);
+    smoothedFreq = (smoothedFreq * 0.78f) + (targetFreq * 0.22f);
   }
+  smoothedDuty = (smoothedDuty * 0.80f) + (targetDuty * 0.20f);
 
-  // Sıvı damlacığı hissi için mikro organik vibrato (FM)
-  uint32_t finalFreq = (uint32_t)smoothedFreq + ((fastRand() % 31) - 15);
+  // Sıvı damlacığı parıltısı için mikro organik vibrato (+- 6 Hz)
+  uint32_t finalFreq = (uint32_t)smoothedFreq + ((fastRand() % 13) - 6);
 
 #if BUZZER_IS_PASSIVE
-  buzzerPlayTone(finalFreq);
+  buzzerPlayTone(finalFreq, smoothedDuty);
 #else
-  int pulsePeriod = constrain(8 - (int)(kineticEnergy * 2.0f) - (int)(accelDelta * 4.0f), 1, 8);
+  int pulsePeriod = constrain(8 - (int)(adxlJerkMagnitude * 4.0f), 1, 8);
   if ((frameCounter % pulsePeriod) == 0) {
-    buzzerPulseActive(18);
+    buzzerPulseActive(4);
   }
 #endif
 }
@@ -452,6 +511,29 @@ static void adxl345ReadGravity() {
     float ax = (float)rawAx * 0.00390625f;
     float ay = (float)rawAy * 0.00390625f;
     float az = (float)rawAz * 0.00390625f;
+
+    static float prevAx = 0.0f;
+    static float prevAy = 0.0f;
+    static float prevAz = 1.0f;
+    static float prevJerkMag = 0.0f;
+
+    // ADXL345 3D İvme Vektörünün Değişim Hızı (Jerk = dA/dt)
+    float dAx = ax - prevAx;
+    float dAy = ay - prevAy;
+    float dAz = az - prevAz;
+    prevAx = ax;
+    prevAy = ay;
+    prevAz = az;
+
+    float currentJerk = sqrtf(dAx * dAx + dAy * dAy + dAz * dAz);
+
+    // Değişim hızının türevi (d|jerk|/dt)
+    float dJerk = fabsf(currentJerk - prevJerkMag);
+    prevJerkMag = currentJerk;
+
+    // Sensör gürültüsünü filtrele (Cihaz sabit tutulduğu an 0'a iner)
+    adxlJerkMagnitude = (adxlJerkMagnitude * 0.30f) + (currentJerk * 0.70f);
+    adxlJerkDerivative = (adxlJerkDerivative * 0.30f) + (dJerk * 0.70f);
 
     float gx = SWAP_XY_AXES ? ay : ax;
     float gy = SWAP_XY_AXES ? ax : ay;
@@ -808,8 +890,10 @@ static void runHardwareDiagnostics() {
     Serial.println("[HATA!] GY-291 bulunamadi!");
   }
 
-  Serial.printf("[BUZZER] MH-FMD Low-Level Trigger Buzzer (GPIO %d) hazir! (Mod: %s)\n",
-                BUZZER_PIN, BUZZER_IS_PASSIVE ? "Pasif Frekans Modu" : "Aktif Tikirti Modu");
+  Serial.printf(
+      "[BUZZER] MH-FMD Low-Level Trigger Buzzer (GPIO %d) hazir! (Mod: %s)\n",
+      BUZZER_PIN,
+      BUZZER_IS_PASSIVE ? "Pasif Frekans Modu" : "Aktif Tikirti Modu");
 
   Serial.println("-------------------------------------------------------");
   Serial.println("KLAVYE TEST KOMUTLARI (Seri Port'tan gonderebilirsin):");
@@ -820,8 +904,10 @@ static void runHardwareDiagnostics() {
   Serial.println("  --- BUZZER DONANIM TESHIS TESTLERI ---");
   Serial.println("  '1' -> Test 1: Aktif Buzzer (Active-LOW, 0V) 500ms");
   Serial.println("  '2' -> Test 2: Aktif Buzzer (Active-HIGH, 3.3V) 500ms");
-  Serial.println("  '3' -> Test 3: Pasif Buzzer (2000 Hz %50 Kare Dalga) 600ms");
-  Serial.println("  '4' -> Test 4: Pasif Buzzer (1000 Hz %50 Kare Dalga) 600ms");
+  Serial.println(
+      "  '3' -> Test 3: Pasif Buzzer (2000 Hz %50 Kare Dalga) 600ms");
+  Serial.println(
+      "  '4' -> Test 4: Pasif Buzzer (1000 Hz %50 Kare Dalga) 600ms");
   Serial.println("  '5' -> Test 5: Cyberpunk Arpej Chime Cal");
   Serial.println("=======================================================\n");
 }
@@ -847,22 +933,27 @@ static void handleSerialCommands() {
         buzzerSilence();
         oledSetPower(false);
         adxl345ConfigureMode(true);
-        Serial.println("[SERI KOMUT] Sistem manuel olarak UYKU MODUNA alindi (Buzzer susturuldu).");
+        Serial.println("[SERI KOMUT] Sistem manuel olarak UYKU MODUNA alindi "
+                       "(Buzzer susturuldu).");
       }
     } else if (c == 'm' || c == 'M') {
       isSoundMuted = !isSoundMuted;
-      if (isSoundMuted) buzzerSilence();
-      Serial.printf("[SERI KOMUT] Buzzer Sesi: %s\n", isSoundMuted ? "KAPALI (MUTE)" : "ACIK");
+      if (isSoundMuted)
+        buzzerSilence();
+      Serial.printf("[SERI KOMUT] Buzzer Sesi: %s\n",
+                    isSoundMuted ? "KAPALI (MUTE)" : "ACIK");
     } else if (c == 'r' || c == 'R') {
       initFluidPool();
       lastWakeTimeMs = millis();
       Serial.println("[SERI KOMUT] Sivi havuzu sifirlandi.");
     } else if (c == '1') {
-      Serial.println("[TEST 1] Aktif Buzzer (Active-LOW: Pin 0V / LOW) 500ms baslatiliyor...");
+      Serial.println("[TEST 1] Aktif Buzzer (Active-LOW: Pin 0V / LOW) 500ms "
+                     "baslatiliyor...");
       buzzerPulseActive(500);
       Serial.println("[TEST 1] Tamamlandi. Ses geldi mi?");
     } else if (c == '2') {
-      Serial.println("[TEST 2] Aktif Buzzer (Active-HIGH: Pin 3.3V / HIGH) 500ms baslatiliyor...");
+      Serial.println("[TEST 2] Aktif Buzzer (Active-HIGH: Pin 3.3V / HIGH) "
+                     "500ms baslatiliyor...");
       if (buzzerAttached) {
 #if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
         ledcDetach(BUZZER_PIN);
@@ -879,16 +970,14 @@ static void handleSerialCommands() {
       buzzerSilence();
       Serial.println("[TEST 2] Tamamlandi. Ses geldi mi?");
     } else if (c == '3') {
-      Serial.println("[TEST 3] Pasif Buzzer (2000 Hz, %50 Kare Dalga) 600ms baslatiliyor...");
-      buzzerPlayTone(2000);
-      delay(600);
-      buzzerSilence();
+      Serial.println("[TEST 3] Pasif Buzzer (2000 Hz Doğrudan Donanımsal Kare "
+                     "Dalga) 800ms baslatiliyor...");
+      buzzerDirectTone(2000, 800);
       Serial.println("[TEST 3] Tamamlandi. Ses geldi mi?");
     } else if (c == '4') {
-      Serial.println("[TEST 4] Pasif Buzzer (1000 Hz, %50 Kare Dalga) 600ms baslatiliyor...");
-      buzzerPlayTone(1000);
-      delay(600);
-      buzzerSilence();
+      Serial.println("[TEST 4] Pasif Buzzer (1000 Hz Doğrudan Donanımsal Kare "
+                     "Dalga) 800ms baslatiliyor...");
+      buzzerDirectTone(1000, 800);
       Serial.println("[TEST 4] Tamamlandi. Ses geldi mi?");
     } else if (c == '5') {
       Serial.println("[TEST 5] Cyberpunk Arpej Chime baslatiliyor...");
@@ -995,15 +1084,18 @@ void waterSimTask(void *pvParameters) {
     if (now - lastTelemetryMs >= 2000) {
       lastTelemetryMs = now;
       uint32_t remSec = (WAKE_TIMEOUT_MS - elapsed) / 1000;
-      Serial.printf("[PROMOTION PBD] Fx:%+.2f Fy:%+.2f | Enerji:%.2f | Ses:%.0fHz | FPS:%lu "
+      Serial.printf("[PROMOTION PBD] Fx:%+.2f Fy:%+.2f | Enerji:%.2f | "
+                    "Ses:%.0fHz | FPS:%lu "
                     "| Kalan:%lu sn\n",
-                    effGx, effGy, smoothedKinetic, isSoundMuted ? 0.0f : smoothedFreq,
-                    (unsigned long)liveFps, (unsigned long)remSec);
+                    effGx, effGy, smoothedKinetic,
+                    isSoundMuted ? 0.0f : smoothedFreq, (unsigned long)liveFps,
+                    (unsigned long)remSec);
     }
 
     // ADAPTİF PROMOTION FPS DİNAMİĞİ (PİL KORUMA & HİPER-AKIŞKANLIK):
     // Hareket / Çalkalanma halinde: 8 ms hedef (~110-120 FPS, ultra akıcı)
-    // Sıvı durulunca: 30 ms hedef (~33 FPS, %70 CPU/I2C uyku modu, bataryayı korur)
+    // Sıvı durulunca: 30 ms hedef (~33 FPS, %70 CPU/I2C uyku modu, bataryayı
+    // korur)
     uint32_t targetFrameTimeMs =
         (smoothedKinetic > 0.06f || shakeMagnitude > 0.04f) ? 8 : 30;
     uint32_t workTime = millis() - frameStart;
@@ -1017,7 +1109,8 @@ void waterSimTask(void *pvParameters) {
 }
 
 void setup() {
-  // İlk anda buzzer'ın ötmesini engellemek için hemen HIGH (Sus / Cutoff) konumuna kilitle
+  // İlk anda buzzer'ın ötmesini engellemek için hemen HIGH (Sus / Cutoff)
+  // konumuna kilitle
   buzzerSilence();
 
   Serial.begin(115200);
